@@ -5,7 +5,7 @@ import requests
 import telegram
 from sqlalchemy import Column, ForeignKey, UniqueConstraint
 from sqlalchemy import Integer, BigInteger, String, Text, LargeBinary, DateTime, Boolean
-from sqlalchemy.ext.declarative import declarative_base, DeferredReflection
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, backref
 
 import utils
@@ -20,7 +20,7 @@ TableDeclarativeBase = declarative_base()
 
 
 # Define all the database tables using the sqlalchemy declarative base
-class User(DeferredReflection, TableDeclarativeBase):
+class User(TableDeclarativeBase):
     """A Telegram user who used the bot at least once."""
 
     # Telegram data
@@ -87,7 +87,7 @@ class User(DeferredReflection, TableDeclarativeBase):
         return f"<User {self.mention()} having {self.credit} credit>"
 
 
-class Product(DeferredReflection, TableDeclarativeBase):
+class Product(TableDeclarativeBase):
     """A purchasable product."""
 
     # Product id
@@ -151,7 +151,7 @@ class Product(DeferredReflection, TableDeclarativeBase):
         self.image = r.content
 
 
-class Transaction(DeferredReflection, TableDeclarativeBase):
+class Transaction(TableDeclarativeBase):
     """A greed wallet transaction.
     Wallet credit ISN'T calculated from these, but they can be used to recalculate it."""
     # TODO: split this into multiple tables
@@ -181,7 +181,7 @@ class Transaction(DeferredReflection, TableDeclarativeBase):
 
     # Order ID
     order_id = Column(Integer, ForeignKey("orders.order_id"))
-    order = relationship("Order")
+    order = relationship("Order", back_populates="transaction")
 
     # Extra table parameters
     __tablename__ = "transactions"
@@ -195,13 +195,19 @@ class Transaction(DeferredReflection, TableDeclarativeBase):
             string += f" | {self.provider}"
         if self.notes:
             string += f" | {self.notes}"
+        if self.payment_name:
+            string += f" | {self.payment_name}"
+        if self.payment_phone:
+            string += f" | +{self.payment_phone}"
+        if self.payment_email:
+            string += f" | {self.payment_email}"
         return string
 
     def __repr__(self):
         return f"<Transaction {self.transaction_id} for User {self.user_id}>"
 
 
-class Admin(DeferredReflection, TableDeclarativeBase):
+class Admin(TableDeclarativeBase):
     """A greed administrator with his permissions."""
 
     # The telegram id
@@ -223,7 +229,7 @@ class Admin(DeferredReflection, TableDeclarativeBase):
         return f"<Admin {self.user_id}>"
 
 
-class Order(DeferredReflection, TableDeclarativeBase):
+class Order(TableDeclarativeBase):
     """An order which has been placed by an user.
     It may include multiple products, available in the OrderItem table."""
 
@@ -241,11 +247,11 @@ class Order(DeferredReflection, TableDeclarativeBase):
     # Refund reason: if null, product hasn't been refunded
     refund_reason = Column(Text)
     # List of items in the order
-    items: typing.List["OrderItem"] = relationship("OrderItem")
+    items: typing.List["OrderItem"] = relationship("OrderItem", back_populates="order")
     # Extra details specified by the purchasing user
     notes = Column(Text)
     # Linked transaction
-    transaction = relationship("Transaction", uselist=False)
+    transaction = relationship("Transaction", back_populates="order", uselist=False)
 
     # Extra table parameters
     __tablename__ = "orders"
@@ -253,8 +259,7 @@ class Order(DeferredReflection, TableDeclarativeBase):
     def __repr__(self):
         return f"<Order {self.order_id} placed by User {self.user_id}>"
 
-    def text(self, w: "worker.Worker", session, user=False):
-        joined_self = session.query(Order).filter_by(order_id=self.order_id).join(Transaction).one()
+    def text(self, w: "worker.Worker", user=False):
         items = ""
         for item in self.items:
             items += item.text(w) + "\n"
@@ -273,7 +278,7 @@ class Order(DeferredReflection, TableDeclarativeBase):
                              status_text=status_text,
                              items=items,
                              notes=self.notes,
-                             value=str(w.Price(-joined_self.transaction.value))) + \
+                             value=str(w.Price(-self.transaction.value))) + \
                    (w.loc.get("refund_reason", reason=self.refund_reason) if self.refund_date is not None else "")
         else:
             return status_emoji + " " + \
@@ -283,11 +288,11 @@ class Order(DeferredReflection, TableDeclarativeBase):
                              date=self.creation_date.isoformat(),
                              items=items,
                              notes=self.notes if self.notes is not None else "",
-                             value=str(w.Price(-joined_self.transaction.value))) + \
+                             value=str(w.Price(-self.transaction.value))) + \
                    (w.loc.get("refund_reason", reason=self.refund_reason) if self.refund_date is not None else "")
 
 
-class OrderItem(DeferredReflection, TableDeclarativeBase):
+class OrderItem(TableDeclarativeBase):
     """A product that has been purchased as part of an order."""
 
     # The unique item id
@@ -297,6 +302,7 @@ class OrderItem(DeferredReflection, TableDeclarativeBase):
     product = relationship("Product")
     # The order in which this item is being purchased
     order_id = Column(Integer, ForeignKey("orders.order_id"), nullable=False)
+    order = relationship("Order", back_populates="items")
 
     # Extra table parameters
     __tablename__ = "orderitems"

@@ -1,9 +1,9 @@
+import os
+import sys
 import datetime
 import logging
-import os
 import queue as queuem
 import re
-import sys
 import threading
 import traceback
 import uuid
@@ -11,7 +11,7 @@ from html import escape
 from typing import *
 
 import requests
-import sqlalchemy.orm
+import sqlalchemy
 import telegram
 
 import database as db
@@ -173,12 +173,10 @@ class Worker(threading.Thread):
             self.user = db.User(w=self)
             # Add the new record to the db
             self.session.add(self.user)
-            # Flush the session to get an userid
-            self.session.flush()
             # If the will be owner flag is set
             if will_be_owner:
                 # Become owner
-                self.admin = db.Admin(user_id=self.user.user_id,
+                self.admin = db.Admin(user=self.user,
                                       edit_products=True,
                                       receive_orders=True,
                                       create_transactions=True,
@@ -307,7 +305,7 @@ class Worker(threading.Thread):
             if update.message.text is None:
                 continue
             # Try to match the regex with the received message
-            match = re.search(regex, update.message.text)
+            match = re.search(regex, update.message.text, re.DOTALL)
             # Ensure there is a match
             if match is None:
                 continue
@@ -649,13 +647,12 @@ class Worker(threading.Thread):
                          notes=notes if not isinstance(notes, CancelSignal) else "")
         # Add the record to the session and get an ID
         self.session.add(order)
-        self.session.flush()
         # For each product added to the cart, create a new OrderItem
         for product in cart:
             # Create {quantity} new OrderItems
             for i in range(0, cart[product][1]):
                 order_item = db.OrderItem(product=cart[product][0],
-                                          order_id=order.order_id)
+                                          order=order)
                 self.session.add(order_item)
         # Ensure the user has enough credit to make the purchase
         credit_required = self.__get_cart_value(cart) - self.user.credit
@@ -698,7 +695,7 @@ class Worker(threading.Thread):
         # Create a new transaction and add it to the session
         transaction = db.Transaction(user=self.user,
                                      value=value,
-                                     order_id=order.order_id)
+                                     order=order)
         self.session.add(transaction)
         # Commit all the changes
         self.session.commit()
@@ -712,7 +709,6 @@ class Worker(threading.Thread):
     def __order_notify_admins(self, order):
         # Notify the user of the order result
         self.bot.send_message(self.chat.id, self.loc.get("success_order_created", order=order.text(w=self,
-                                                                                                   session=self.session,
                                                                                                    user=True)))
         # Notify the admins (in Live Orders mode) of the new order
         admins = self.session.query(db.Admin).filter_by(live_mode=True).all()
@@ -726,7 +722,7 @@ class Worker(threading.Thread):
         for admin in admins:
             self.bot.send_message(admin.user_id,
                                   self.loc.get('notification_order_placed',
-                                               order=order.text(w=self, session=self.session)),
+                                               order=order.text(w=self)),
                                   reply_markup=order_keyboard)
 
     def __order_status(self):
@@ -743,7 +739,7 @@ class Worker(threading.Thread):
             self.bot.send_message(self.chat.id, self.loc.get("error_no_orders"))
         # Display the order status to the user
         for order in orders:
-            self.bot.send_message(self.chat.id, order.text(w=self, session=self.session, user=True))
+            self.bot.send_message(self.chat.id, order.text(w=self, user=True))
         # TODO: maybe add a page displayer instead of showing the latest 5 orders
 
     def __add_credit_menu(self):
@@ -808,12 +804,12 @@ class Worker(threading.Thread):
             if value > self.Price(self.cfg["Payments"]["CreditCard"]["max_amount"]):
                 self.bot.send_message(self.chat.id,
                                       self.loc.get("error_payment_amount_over_max",
-                                                   max_amount=self.Price(self.cfg["Credit Card"]["max_amount"])))
+                                                   max_amount=self.Price(self.cfg["CreditCard"]["max_amount"])))
                 continue
             elif value < self.Price(self.cfg["Payments"]["CreditCard"]["min_amount"]):
                 self.bot.send_message(self.chat.id,
                                       self.loc.get("error_payment_amount_under_min",
-                                                   min_amount=self.Price(self.cfg["Credit Card"]["min_amount"])))
+                                                   min_amount=self.Price(self.cfg["CreditCard"]["min_amount"])))
                 continue
             break
         # If the user cancelled the action...
@@ -850,7 +846,10 @@ class Worker(threading.Thread):
                               need_name=self.cfg["Payments"]["CreditCard"]["name_required"],
                               need_email=self.cfg["Payments"]["CreditCard"]["email_required"],
                               need_phone_number=self.cfg["Payments"]["CreditCard"]["phone_required"],
-                              reply_markup=inline_keyboard)
+                              reply_markup=inline_keyboard,
+                              max_tip_amount=self.cfg["Payments"]["CreditCard"]["max_tip_amount"],
+                              suggested_tip_amounts=self.cfg["Payments"]["CreditCard"]["tip_presets"],
+                              )
         # Wait for the precheckout query
         precheckoutquery = self.__wait_for_precheckoutquery(cancellable=True)
         # Check if the user has cancelled the invoice
@@ -863,7 +862,7 @@ class Worker(threading.Thread):
         successfulpayment = self.__wait_for_successfulpayment(cancellable=False)
         # Create a new database transaction
         transaction = db.Transaction(user=self.user,
-                                     value=int(successfulpayment.total_amount) - fee,
+                                     value=int(amount),
                                      provider="Credit Card",
                                      telegram_charge_id=successfulpayment.telegram_payment_charge_id,
                                      provider_charge_id=successfulpayment.provider_payment_charge_id)
@@ -1040,6 +1039,8 @@ class Worker(threading.Thread):
             price = None
         else:
             price = self.Price(price)
+        if not isinstance(price, CancelSignal) and price is not None:
+            price = int(price)
         # Ask for the product image
         self.bot.send_message(self.chat.id, self.loc.get("ask_product_image"), reply_markup=cancel)
         # Wait for an answer
@@ -1050,7 +1051,7 @@ class Worker(threading.Thread):
             # noinspection PyTypeChecker
             product = db.Product(name=name,
                                  description=description,
-                                 price=int(price) if price is not None else None,
+                                 price=price,
                                  deleted=False)
             # Add the record to the database
             self.session.add(product)
@@ -1059,7 +1060,7 @@ class Worker(threading.Thread):
             # Edit the record with the new values
             product.name = name if not isinstance(name, CancelSignal) else product.name
             product.description = description if not isinstance(description, CancelSignal) else product.description
-            product.price = int(price) if not isinstance(price, CancelSignal) else product.price
+            product.price = price if not isinstance(price, CancelSignal) else product.price
         # If a photo has been sent...
         if isinstance(photo_list, list):
             # Find the largest photo id
@@ -1137,7 +1138,7 @@ class Worker(threading.Thread):
         # Create a message for every one of them
         for order in orders:
             # Send the created message
-            self.bot.send_message(self.chat.id, order.text(w=self, session=self.session),
+            self.bot.send_message(self.chat.id, order.text(w=self),
                                   reply_markup=order_keyboard)
         # Set the Live mode flag to True
         self.admin.live_mode = True
@@ -1153,7 +1154,7 @@ class Worker(threading.Thread):
                 break
             # Find the order
             order_id = re.search(self.loc.get("order_number").replace("{id}", "([0-9]+)"), update.message.text).group(1)
-            order = self.session.query(db.Order).filter(db.Order.order_id == order_id).one()
+            order = self.session.query(db.Order).get(order_id)
             # Check if the order hasn't been already cleared
             if order.delivery_date is not None or order.refund_date is not None:
                 # Notify the admin and skip that order
@@ -1166,12 +1167,12 @@ class Worker(threading.Thread):
                 # Commit the transaction
                 self.session.commit()
                 # Update order message
-                self.bot.edit_message_text(order.text(w=self, session=self.session), chat_id=self.chat.id,
+                self.bot.edit_message_text(order.text(w=self), chat_id=self.chat.id,
                                            message_id=update.message.message_id)
                 # Notify the user of the completition
                 self.bot.send_message(order.user_id,
                                       self.loc.get("notification_order_completed",
-                                                   order=order.text(w=self, session=self.session, user=True)))
+                                                   order=order.text(w=self, user=True)))
             # If the user pressed the refund order button, refund the order...
             elif update.data == "order_refund":
                 # Ask for a refund reason
@@ -1195,13 +1196,12 @@ class Worker(threading.Thread):
                 # Commit the changes
                 self.session.commit()
                 # Update the order message
-                self.bot.edit_message_text(order.text(w=self, session=self.session),
+                self.bot.edit_message_text(order.text(w=self),
                                            chat_id=self.chat.id,
                                            message_id=update.message.message_id)
                 # Notify the user of the refund
                 self.bot.send_message(order.user_id,
                                       self.loc.get("notification_order_refunded", order=order.text(w=self,
-                                                                                                   session=self.session,
                                                                                                    user=True)))
                 # Notify the admin of the refund
                 self.bot.send_message(self.chat.id, self.loc.get("success_order_refunded", order_id=order.order_id))
@@ -1220,7 +1220,7 @@ class Worker(threading.Thread):
         # Request from the user the amount of money to be credited manually
         self.bot.send_message(self.chat.id, self.loc.get("ask_credit"), reply_markup=cancel)
         # Wait for an answer
-        reply = self.__wait_for_regex(r"(-? ?[0-9]{1,3}(?:[.,][0-9]{1,2})?)", cancellable=True)
+        reply = self.__wait_for_regex(r"(-? ?[0-9]+(?:[.,][0-9]{1,2})?)", cancellable=True)
         # Allow the cancellation of the operation
         if isinstance(reply, CancelSignal):
             return
@@ -1340,7 +1340,7 @@ class Worker(threading.Thread):
         """Generate a .csv file containing the list of all transactions."""
         log.debug("Generating __transaction_file")
         # Retrieve all the transactions
-        transactions = self.session.query(db.Transaction).order_by(db.Transaction.transaction_id.asc()).all()
+        transactions = self.session.query(db.Transaction).order_by(db.Transaction.transaction_id).all()
         # Create the file if it doesn't exists
         try:
             with open(f"transactions_{self.chat.id}.csv", "x"):
@@ -1391,7 +1391,7 @@ class Worker(threading.Thread):
         if isinstance(user, CancelSignal):
             return
         # Check if the user is already an administrator
-        admin = self.session.query(db.Admin).filter_by(user_id=user.user_id).one_or_none()
+        admin = self.session.query(db.Admin).filter_by(user=user).one_or_none()
         if admin is None:
             # Create the keyboard to be sent
             keyboard = telegram.ReplyKeyboardMarkup([[self.loc.get("emoji_yes"), self.loc.get("emoji_no")]],
@@ -1492,6 +1492,10 @@ class Worker(threading.Thread):
             lang = "🇲🇽 Español"
             keyboard.append([telegram.KeyboardButton(lang)])
             options[lang] = "es_mx"
+        if "pt_br" in self.cfg["Language"]["enabled_languages"]:
+            lang = "🇧🇷 Português"
+            keyboard.append([telegram.KeyboardButton(lang)])
+            options[lang] = "pt_br"
         # Send the previously created keyboard to the user (ensuring it can be clicked only 1 time)
         self.bot.send_message(self.chat.id,
                               self.loc.get("conversation_language_select"),

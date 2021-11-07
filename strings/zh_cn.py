@@ -334,14 +334,17 @@ payment_invoice_fee_label = "交易费"
 
 # Notification: order has been placed
 notification_order_placed = "新订单是:\n" \
+                            "\n" \
                             "{order}"
 
 # Notification: order has been completed
 notification_order_completed = "您的订单已完成\n" \
+                               "\n" \
                                "{order}"
 
 # Notification: order has been refunded
 notification_order_refunded = "您的订单已退款\n" \
+                              "\n" \
                               "{order}"
 
 # Notification: a manual transaction was applied
@@ -360,7 +363,7 @@ bot_info = '此机器人正在使用 <a href="https://github.com/Steffo99/greed"
 
 # Help: guide
 help_msg = "greed的指南可在此地址获得(未翻译):\n" \
-           "https://docs.google.com/document/d/1f4MKVr0B7RSQfWTSa_6ZO0LM4nPpky_GX_qdls3EHtQ/"
+           "https://github.com/Steffo99/greed/wiki"
 
 # Help: contact shopkeeper
 contact_shopkeeper = "目前可提供帮助和支持的人员包括:\n" \

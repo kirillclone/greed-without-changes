@@ -1,11 +1,9 @@
 import logging
-import os
-import sys
+import os, sys
 import threading
 
 import sqlalchemy
 import sqlalchemy.ext.declarative as sed
-import sqlalchemy.orm
 import telegram
 
 import database
@@ -84,7 +82,7 @@ def main():
     sed.DeferredReflection.prepare(engine)
 
     # Create a bot instance
-    bot = duckbot.factory(user_cfg)()
+    bot = duckbot.factory(user_cfg)(request=telegram.utils.request.Request(user_cfg["Telegram"]["con_pool_size"]))
 
     # Test the specified token
     log.debug("Testing bot token...")

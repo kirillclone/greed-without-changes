@@ -332,14 +332,17 @@ payment_invoice_fee_label = "Comisión de la transacción"
 
 # Notification: order has been placed
 notification_order_placed = "Se realizó una nueva orden:\n" \
+                            "\n" \
                             "{order}"
 
 # Notification: order has been completed
 notification_order_completed = "¡Tu orden ha sido completada!\n" \
+                               "\n" \
                                "{order}"
 
 # Notification: order has been refunded
 notification_order_refunded = "¡Tu orden ha sido reembolsada!\n" \
+                              "\n" \
                               "{order}"
 
 # Notification: a manual transaction was applied
@@ -358,7 +361,7 @@ bot_info = 'Este bot está usando <a href="https://github.com/Steffo99/greed">gr
 
 # Help: guide
 help_msg = "La guía de greed está disponible en este enlace:\n" \
-           "https://docs.google.com/document/d/1f4MKVr0B7RSQfWTSa_6ZO0LM4nPpky_GX_qdls3EHtQ/"
+           "https://github.com/Steffo99/greed/wiki"
 
 # Help: contact shopkeeper
 contact_shopkeeper = "Actualmente, el personal disponible para brindar asistencia al cliente está compuesto por:\n" \
